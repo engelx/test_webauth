@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba WebAuthn</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="w-full max-w-lg bg-gray-800 rounded-lg shadow-xl p-6 border border-gray-700">
+        <h1 class="text-2xl font-bold mb-4 text-white">Tester WebAuthn</h1>
+        
+        <p class="text-sm text-gray-400 mb-6">
+            Este cliente simula el flujo sin un servidor backend. Las credenciales se generan y validan contra la memoria local de esta sesión. Tu navegador debe soportar y permitir el uso de credenciales de plataforma (huella, FaceID, Windows Hello).
+        </p>
+
+        <div class="space-y-4">
+            <button id="btn-register" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800">
+                1. Registrar Huella / Autenticador
+            </button>
+            
+            <button id="btn-auth" disabled class="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-800">
+                2. Autenticar Usuario
+            </button>
+        </div>
+
+        <div class="mt-6">
+            <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-2">Registro de Consola</h2>
+            <div id="console-output" class="w-full h-48 bg-black rounded p-3 text-xs font-mono text-green-400 overflow-y-auto whitespace-pre-wrap break-all border border-gray-700">Esperando interacción...</div>
+        </div>
+    </div>
+
+    <script>
+        const btnRegister = document.getElementById('btn-register');
+        const btnAuth = document.getElementById('btn-auth');
+        const consoleOutput = document.getElementById('console-output');
+
+        let storedCredentialId = null;
+
+        function log(message, isError = false) {
+            const time = new Date().toLocaleTimeString();
+            const colorClass = isError ? 'text-red-400' : 'text-green-400';
+            const html = `<span class="text-gray-500">[${time}]</span> <span class="${colorClass}">${message}</span>\n`;
+            consoleOutput.innerHTML += html;
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+
+        function bufferToBase64url(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let str = '';
+            for (let charCode of bytes) {
+                str += String.fromCharCode(charCode);
+            }
+            return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        }
+
+        async function registerUser() {
+            log("Iniciando registro (navigator.credentials.create)...");
+            
+            if (!window.PublicKeyCredential) {
+                log("API WebAuthn no soportada en este entorno.", true);
+                return;
+            }
+
+            const challenge = crypto.getRandomValues(new Uint8Array(32));
+            const userId = crypto.getRandomValues(new Uint8Array(16));
+
+            const publicKeyCredentialCreationOptions = {
+                challenge: challenge,
+                rp: {
+                    name: "Prueba WebAuthn Local",
+                },
+                user: {
+                    id: userId,
+                    name: "usuario_prueba",
+                    displayName: "Usuario de Prueba"
+                },
+                pubKeyCredParams: [
+                    { alg: -7, type: "public-key" },  // ES256
+                    { alg: -257, type: "public-key" } // RS256
+                ],
+                authenticatorSelection: {
+                    authenticatorAttachment: "platform", // Fuerza el uso del autenticador del dispositivo (huella/rostro)
+                    userVerification: "required"
+                },
+                timeout: 60000,
+                attestation: "none"
+            };
+
+            try {
+                const credential = await navigator.credentials.create({
+                    publicKey: publicKeyCredentialCreationOptions
+                });
+
+                storedCredentialId = credential.rawId;
+                
+                log("Credencial creada y almacenada en memoria.");
+                log(`ID Credencial: ${bufferToBase64url(credential.rawId)}`);
+                
+                btnAuth.disabled = false;
+            } catch (error) {
+                log(`Fallo en registro: ${error.name} - ${error.message}`, true);
+                log("Verifica que estás en un contexto seguro y que tu dispositivo tiene un autenticador configurado.", true);
+            }
+        }
+
+        async function authenticateUser() {
+            log("Iniciando validación (navigator.credentials.get)...");
+
+            if (!storedCredentialId) {
+                log("No hay credencial registrada en esta sesión.", true);
+                return;
+            }
+
+            const challenge = crypto.getRandomValues(new Uint8Array(32));
+
+            const publicKeyCredentialRequestOptions = {
+                challenge: challenge,
+                allowCredentials: [{
+                    id: storedCredentialId,
+                    type: 'public-key',
+                    transports: ['internal']
+                }],
+                userVerification: "required",
+                timeout: 60000
+            };
+
+            try {
+                const assertion = await navigator.credentials.get({
+                    publicKey: publicKeyCredentialRequestOptions
+                });
+
+                log("Autenticación exitosa.");
+                log(`Firma generada por el autenticador: ${bufferToBase64url(assertion.response.signature)}`);
+            } catch (error) {
+                log(`Fallo en autenticación: ${error.name} - ${error.message}`, true);
+            }
+        }
+
+        btnRegister.addEventListener('click', registerUser);
+        btnAuth.addEventListener('click', authenticateUser);
+    </script>
+</body>
+</html>
